@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Feed the cat</title>
+  <style>
+    :root{
+      --pink:#ff00aa;
+      --card:#ffffffcc;
+      --shadow: 0 10px 25px rgba(0,0,0,.12);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-rounded, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 20% 20%, #fff7a8 0 18%, transparent 19%),
+        radial-gradient(circle at 80% 30%, #a8ffef 0 18%, transparent 19%),
+        radial-gradient(circle at 60% 80%, #c7b6ff 0 18%, transparent 19%),
+        linear-gradient(135deg, #ffe3f2, #d8fff3);
+      overflow:hidden;
+    }
+    header{
+      position:fixed;
+      inset:12px 12px auto 12px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      pointer-events:none;
+      z-index:5;
+    }
+    h1{
+      margin:0;
+      font-size: clamp(26px, 3.5vw, 44px);
+      font-weight: 900;
+      color: var(--pink);
+      text-shadow: 0 2px 0 rgba(255,255,255,.9), 0 10px 18px rgba(0,0,0,.12);
+      letter-spacing: .5px;
+    }
+    .hud{
+      position:fixed;
+      top:12px;
+      left:12px;
+      right:12px;
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      z-index:6;
+      pointer-events:none;
+    }
+    .pill{
+      background: var(--card);
+      border: 2px solid rgba(255,255,255,.7);
+      box-shadow: var(--shadow);
+      border-radius: 999px;
+      padding: 10px 14px;
+      min-width: 150px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      font-weight:900;
+    }
+    .pill .label{opacity:.75}
+    .pill .value{font-variant-numeric: tabular-nums}
+    .wrap{
+      height:100%;
+      display:flex;
+      flex-direction:column;
+      padding-top:78px;
+    }
+    .stage{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      padding: 10px 10px 14px;
+      gap:10px;
+      min-height: 0; /* important for flex + canvas sizing */
+    }
+    canvas{
+      width:100%;
+      display:block;
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      background: #ffffffc7;
+      border: 3px solid rgba(255,255,255,.8);
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    #catCanvas{flex: 1.05;}
+    #gameCanvas{flex: .95;}
+
+    .help{
+      position:fixed;
+      bottom:12px;
+      left:12px;
+      right:12px;
+      display:flex;
+      justify-content:center;
+      z-index:6;
+      pointer-events:none;
+    }
+    .help .card{
+      pointer-events:none;
+      max-width: 980px;
+      width: min(980px, 100%);
+      background: var(--card);
+      border: 2px solid rgba(255,255,255,.7);
+      box-shadow: var(--shadow);
+      border-radius: 18px;
+      padding: 10px 12px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      font-weight:900;
+    }
+    .btn{
+      pointer-events:auto;
+      cursor:pointer;
+      border:none;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 1000;
+      background: linear-gradient(135deg, #ff7ad9, #7af5ff);
+      box-shadow: 0 10px 20px rgba(0,0,0,.12);
+      color:#1b1b1b;
+    }
+    .btn:active{transform: translateY(1px)}
+    kbd{
+      background:#fff;
+      border:2px solid rgba(0,0,0,.08);
+      border-bottom-width:4px;
+      padding:2px 8px;
+      border-radius:10px;
+      font-weight:1000;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="hud">
+    <div class="pill" aria-live="polite">
+      <span class="label">⏳ Tempo</span>
+      <span class="value" id="timeLeft">01:00</span>
+    </div>
+    <div class="pill" aria-live="polite">
+      <span class="label">🐟 Punteggio</span>
+      <span class="value" id="score">0</span>
+    </div>
+  </div>
+
+  <header><h1>feed the cat</h1></header>
+
+  <div class="wrap">
+    <div class="stage">
+      <canvas id="catCanvas" aria-label="Gatto nella parte superiore"></canvas>
+      <canvas id="gameCanvas" aria-label="Tavola e pesce da tagliare"></canvas>
+    </div>
+  </div>
+
+  <div class="help">
+    <div class="card">
+      <div>
+        <div>🎯 Obiettivo: taglia più pesci possibile in 1 minuto per sfamare il gatto!</div>
+        <div style="opacity:.85; font-size:14px;">
+          Muovi il mouse per mirare 🧿 e premi <kbd>SPAZIO</kbd> per fare un taglio (il gatto fa “miao”).
+          Dopo <b>5 tagli</b> (poi <b>6</b> dopo 10 pesci) il gatto mangia e arriva un altro pesce (tonno/salmone).
+        </div>
+      </div>
+      <button class="btn" id="startBtn">▶️ Start / Restart</button>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const catCanvas = document.getElementById('catCanvas');
+  const gameCanvas = document.getElementById('gameCanvas');
+  const catCtx = catCanvas.getContext('2d');
+  const ctx = gameCanvas.getContext('2d');
+
+  const timeEl = document.getElementById('timeLeft');
+  const scoreEl = document.getElementById('score');
+  const startBtn = document.getElementById('startBtn');
+
+  // Robust canvas sizing: use clientWidth/clientHeight after layout
+  function setCanvasSize(canvas){
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const w = Math.floor(canvas.clientWidth * dpr);
+    const h = Math.floor(canvas.clientHeight * dpr);
+    if(w < 20 || h < 20) return {w: canvas.clientWidth, h: canvas.clientHeight, ok:false};
+    canvas.width = w;
+    canvas.height = h;
+    const c = canvas.getContext('2d');
+    c.setTransform(dpr,0,0,dpr,0,0);
+    return {w: canvas.clientWidth, h: canvas.clientHeight, ok:true};
+  }
+
+  let catSize = {w:0,h:0,ok:false};
+  let size = {w:0,h:0,ok:false};
+
+  function resize(){
+    catSize = setCanvasSize(catCanvas);
+    size = setCanvasSize(gameCanvas);
+    if(size.ok) resetFish(true);
+  }
+  window.addEventListener('resize', () => {
+    // wait a frame so layout settles
+    requestAnimationFrame(() => requestAnimationFrame(resize));
+  });
+
+  // Ensure layout is ready before first resize
+  window.addEventListener('load', () => {
+    requestAnimationFrame(() => requestAnimationFrame(resize));
+  });
+  // Also call once in case load already happened
+  requestAnimationFrame(() => requestAnimationFrame(resize));
+
+  // ---------- "miao" synth ----------
+  let audioCtx = null;
+  function meow(){
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const now = audioCtx.currentTime;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(650, now);
+      o.frequency.exponentialRampToValueAtTime(360, now + 0.12);
+      o.frequency.exponentialRampToValueAtTime(430, now + 0.22);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.28, now + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(now); o.stop(now + 0.28);
+    }catch(e){}
+  }
+
+  // ---------- Game state ----------
+  const GAME_SECONDS = 60;
+  let running = false;
+  let timeLeft = GAME_SECONDS;
+  let score = 0;
+
+  const FISH_TYPES = [
+    {name:'Tonno',  body:'#6aa6ff', belly:'#cfe6ff', accent:'#1c5fbf'},
+    {name:'Salmone', body:'#ff7b7b', belly:'#ffd1b3', accent:'#b23a3a'}
+  ];
+  let fishIndex = 0;
+
+  let slices = [];
+  let cutsOnFish = 0;
+  let cutsNeeded = 5;
+
+  let aim = {x: 0, y: 0, has: false};
+
+  let fish = { x: 0, y: 0, w: 0, h: 0, flying:false, flyT:0 };
+  let cat = { blinkT: 0, munchT: 0 };
+
+  function resetFish(keepType=false){
+    slices = [];
+    cutsOnFish = 0;
+    fish.flying = false;
+    fish.flyT = 0;
+
+    fish.w = Math.min(380, size.w * 0.62);
+    fish.h = Math.min(150, size.h * 0.50);
+    fish.x = (size.w - fish.w) / 2;
+    fish.y = (size.h - fish.h) / 2 + 12;
+
+    if(!keepType){
+      fishIndex = (fishIndex + 1) % FISH_TYPES.length;
+    }
+  }
+
+  function startGame(){
+    running = true;
+    timeLeft = GAME_SECONDS;
+    score = 0;
+    cutsNeeded = 5;
+    fishIndex = -1;
+    scoreEl.textContent = score;
+    updateTimeUI();
+    if(size.ok) resetFish(false);
+  }
+
+  function stopGame(){ running = false; }
+
+  function updateTimeUI(){
+    const total = Math.ceil(timeLeft);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    timeEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  }
+
+  // ---------- Input ----------
+  function getCanvasPos(e, canvas){
+    const r = canvas.getBoundingClientRect();
+    return {x: (e.clientX - r.left), y: (e.clientY - r.top)};
+  }
+
+  gameCanvas.addEventListener('pointermove', (e) => {
+    const p = getCanvasPos(e, gameCanvas);
+    aim.x = p.x; aim.y = p.y; aim.has = true;
+  });
+
+  function pointInFish(px, py){
+    const cx = fish.x + fish.w*0.52;
+    const cy = fish.y + fish.h*0.56;
+    const rx = fish.w*0.40;
+    const ry = fish.h*0.28;
+    const dx = (px - cx) / rx;
+    const dy = (py - cy) / ry;
+    return (dx*dx + dy*dy) <= 1;
+  }
+
+  function tryCut(){
+    meow();
+    if(!running || timeLeft <= 0 || fish.flying || !size.ok) return;
+
+    if(!aim.has){
+      // if mouse never moved, cut in the center of the fish
+      aim.x = fish.x + fish.w*0.55;
+      aim.y = fish.y + fish.h*0.58;
+      aim.has = true;
+    }
+
+    if(pointInFish(aim.x, aim.y)){
+      cutsOnFish++;
+      slices.push({ x: aim.x, y: aim.y, a: (Math.random()*0.9 - 0.45), life: 1, miss:false });
+
+      if(cutsOnFish >= cutsNeeded){
+        score++;
+        scoreEl.textContent = score;
+        if(score >= 10) cutsNeeded = 6;
+        fish.flying = true;
+        fish.flyT = 0;
+        cat.munchT = 0.55;
+      }
+    }else{
+      slices.push({ x: aim.x, y: aim.y, a: 0, life: 0.55, miss:true });
+    }
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if(e.code === 'Space'){
+      e.preventDefault();
+      tryCut();
+    }
+  }, {passive:false});
+
+  startBtn.addEventListener('click', startGame);
+
+  // ---------- Timer ----------
+  let lastTick = performance.now();
+  function tickTimer(now){
+    const dt = (now - lastTick) / 1000;
+    lastTick = now;
+
+    if(running && timeLeft > 0){
+      const prevCeil = Math.ceil(timeLeft);
+      timeLeft = Math.max(0, timeLeft - dt);
+      const nowCeil = Math.ceil(timeLeft);
+      if(nowCeil !== prevCeil) updateTimeUI();
+      if(timeLeft <= 0){
+        updateTimeUI();
+        stopGame();
+      }
+    }
+    return dt;
+  }
+
+  // ---------- Drawing helpers ----------
+  function roundedRect(c, x,y,w,h,r){
+    const rr = Math.min(r, w/2, h/2);
+    c.beginPath();
+    c.moveTo(x+rr,y);
+    c.arcTo(x+w,y,x+w,y+h,rr);
+    c.arcTo(x+w,y+h,x,y+h,rr);
+    c.arcTo(x,y+h,x,y,rr);
+    c.arcTo(x,y,x+w,y,rr);
+    c.closePath();
+  }
+
+  function drawConfettiBg(c, w, h){
+    const dots = 24;
+    for(let i=0;i<dots;i++){
+      const x = (i*97) % w;
+      const y = (i*53) % h;
+      c.globalAlpha = 0.14;
+      c.beginPath();
+      c.arc(x+20, y+18, 10, 0, Math.PI*2);
+      c.fillStyle = (i%3===0) ? '#ff00aa' : (i%3===1) ? '#00d2ff' : '#7cff6b';
+      c.fill();
+    }
+    c.globalAlpha = 1;
+  }
+
+  // ---------- CAT drawing ----------
+  function drawCat(dt){
+    const w = catSize.w, h = catSize.h;
+    if(!catSize.ok){
+      catCtx.clearRect(0,0,catCanvas.width,catCanvas.height);
+      return;
+    }
+
+    catCtx.clearRect(0,0,w,h);
+
+    const bg = catCtx.createLinearGradient(0,0,w,h);
+    bg.addColorStop(0, '#fff6a8');
+    bg.addColorStop(1, '#bdf7ff');
+    catCtx.fillStyle = bg;
+    catCtx.fillRect(0,0,w,h);
+    drawConfettiBg(catCtx, w, h);
+
+    // ground
+    catCtx.fillStyle = 'rgba(255,255,255,.6)';
+    catCtx.fillRect(0, h*0.78, w, h*0.22);
+
+    const cx = w*0.5, cy = h*0.62;
+    const bodyW = Math.min(w,h)*0.40;
+    const bodyH = bodyW*0.55;
+
+    cat.blinkT += dt;
+    const blink = (Math.sin(cat.blinkT*1.7) > 0.985) ? 1 : 0;
+
+    if(cat.munchT > 0) cat.munchT = Math.max(0, cat.munchT - dt);
+    const mouthOpen = cat.munchT > 0;
+
+    // tail
+    catCtx.strokeStyle = '#0b0b0d';
+    catCtx.lineWidth = Math.max(10, bodyW*0.08);
+    catCtx.lineCap = 'round';
+    catCtx.beginPath();
+    catCtx.moveTo(cx - bodyW*0.45, cy + bodyH*0.10);
+    catCtx.quadraticCurveTo(cx - bodyW*0.85, cy - bodyH*0.25, cx - bodyW*0.50, cy - bodyH*0.55);
+    catCtx.stroke();
+
+    // body
+    catCtx.fillStyle = '#0f0f12';
+    catCtx.beginPath();
+    catCtx.ellipse(cx, cy + bodyH*0.18, bodyW*0.58, bodyH*0.55, 0, 0, Math.PI*2);
+    catCtx.fill();
+
+    // paws
+    catCtx.fillStyle = '#0b0b0d';
+    for(const s of [-1,1]){
+      catCtx.beginPath();
+      catCtx.ellipse(cx + s*bodyW*0.22, cy + bodyH*0.58, bodyW*0.14, bodyH*0.16, 0, 0, Math.PI*2);
+      catCtx.fill();
+    }
+
+    // head
+    const headR = bodyW*0.33;
+    const hx = cx + bodyW*0.28;
+    const hy = cy - bodyH*0.18;
+
+    // ears
+    catCtx.fillStyle = '#111';
+    catCtx.beginPath();
+    catCtx.moveTo(hx - headR*0.60, hy - headR*0.80);
+    catCtx.lineTo(hx - headR*0.25, hy - headR*1.35);
+    catCtx.lineTo(hx - headR*0.05, hy - headR*0.75);
+    catCtx.closePath();
+    catCtx.fill();
+
+    catCtx.beginPath();
+    catCtx.moveTo(hx + headR*0.55, hy - headR*0.78);
+    catCtx.lineTo(hx + headR*0.25, hy - headR*1.38);
+    catCtx.lineTo(hx + headR*0.02, hy - headR*0.76);
+    catCtx.closePath();
+    catCtx.fill();
+
+    // head circle
+    catCtx.fillStyle = '#0f0f12';
+    catCtx.beginPath();
+    catCtx.arc(hx, hy, headR, 0, Math.PI*2);
+    catCtx.fill();
+
+    // eyes
+    const ex = headR*0.46;
+    const eR = headR*0.34;
+    function eye(x){
+      catCtx.fillStyle = '#ffd400';
+      catCtx.beginPath();
+      catCtx.ellipse(hx + x, hy - headR*0.06, eR*1.05, eR*0.86, 0, 0, Math.PI*2);
+      catCtx.fill();
+
+      catCtx.fillStyle = '#101010';
+      catCtx.beginPath();
+      if(blink){
+        catCtx.ellipse(hx + x, hy - headR*0.06, eR*0.65, eR*0.08, 0, 0, Math.PI*2);
+      }else{
+        catCtx.ellipse(hx + x, hy - headR*0.06, eR*0.18, eR*0.75, 0, 0, Math.PI*2);
+      }
+      catCtx.fill();
+
+      if(!blink){
+        catCtx.fillStyle = '#fff';
+        catCtx.beginPath();
+        catCtx.arc(hx + x - eR*0.25, hy - headR*0.12, eR*0.12, 0, Math.PI*2);
+        catCtx.fill();
+      }
+    }
+    eye(-ex); eye(ex);
+
+    // nose + mouth
+    catCtx.fillStyle = '#ff78c9';
+    catCtx.beginPath();
+    catCtx.moveTo(hx, hy + headR*0.18);
+    catCtx.lineTo(hx - headR*0.10, hy + headR*0.30);
+    catCtx.lineTo(hx + headR*0.10, hy + headR*0.30);
+    catCtx.closePath();
+    catCtx.fill();
+
+    catCtx.strokeStyle = '#f5f5f5';
+    catCtx.lineWidth = 3;
+    catCtx.lineCap = 'round';
+    catCtx.beginPath();
+    if(mouthOpen){
+      catCtx.arc(hx, hy + headR*0.46, headR*0.18, 0, Math.PI, false);
+    }else{
+      catCtx.moveTo(hx - headR*0.18, hy + headR*0.46);
+      catCtx.quadraticCurveTo(hx - headR*0.06, hy + headR*0.55, hx, hy + headR*0.50);
+      catCtx.quadraticCurveTo(hx + headR*0.06, hy + headR*0.55, hx + headR*0.18, hy + headR*0.46);
+    }
+    catCtx.stroke();
+
+    // whiskers
+    catCtx.strokeStyle = '#f2f2f2';
+    catCtx.lineWidth = 2;
+    for(const s of [-1,1]){
+      catCtx.beginPath();
+      catCtx.moveTo(hx + s*headR*0.25, hy + headR*0.36);
+      catCtx.lineTo(hx + s*headR*0.95, hy + headR*0.25);
+      catCtx.moveTo(hx + s*headR*0.25, hy + headR*0.42);
+      catCtx.lineTo(hx + s*headR*0.98, hy + headR*0.40);
+      catCtx.moveTo(hx + s*headR*0.25, hy + headR*0.48);
+      catCtx.lineTo(hx + s*headR*0.95, hy + headR*0.58);
+      catCtx.stroke();
+    }
+
+    catCtx.font = '900 18px ui-rounded, system-ui, sans-serif';
+    catCtx.fillStyle = 'rgba(0,0,0,.75)';
+    catCtx.textAlign = 'center';
+    const caption = (!running) ? 'Premi Start per giocare!' : (score>=10 ? 'SUPER AFFAMATO! 😼' : 'Premi SPAZIO per tagliare!');
+    catCtx.fillText(caption, cx, h*0.12);
+  }
+
+  // ---------- Board + Fish ----------
+  function drawBoard(){
+    if(!size.ok){
+      ctx.clearRect(0,0,gameCanvas.width,gameCanvas.height);
+      return;
+    }
+
+    const w = size.w, h = size.h;
+    ctx.clearRect(0,0,w,h);
+
+    const g = ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0, '#eaffff');
+    g.addColorStop(1, '#fff0fb');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+
+    const pad = 18;
+    const bx = pad, by = pad;
+    const bw = w - pad*2, bh = h - pad*2;
+
+    const wood = ctx.createLinearGradient(bx,by,bx+bw,by+bh);
+    wood.addColorStop(0,'#f1c48a');
+    wood.addColorStop(1,'#d99b63');
+    ctx.fillStyle = wood;
+    roundedRect(ctx, bx, by, bw, bh, 22);
+    ctx.fill();
+
+    ctx.save();
+    ctx.clip();
+    ctx.globalAlpha = 0.22;
+    for(let i=0;i<18;i++){
+      ctx.fillStyle = (i%2===0) ? '#b97a43' : '#7f4a21';
+      const sx = bx + (i/18)*bw;
+      ctx.fillRect(sx, by, 6, bh);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    ctx.font = '900 16px ui-rounded, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(0,0,0,.72)';
+    ctx.textAlign = 'left';
+    const fishType = FISH_TYPES[Math.max(0, fishIndex)];
+    const msg = running
+      ? `Pesce: ${fishType.name} • Tagli: ${cutsOnFish}/${cutsNeeded} (SPAZIO)`
+      : (timeLeft<=0 ? `Tempo finito! Punteggio: ${score} 🐟` : 'Premi Start per iniziare!');
+    ctx.fillText(msg, bx+14, by+28);
+
+    drawFish(fishType);
+
+    for(const s of slices){
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.a);
+      ctx.globalAlpha = Math.max(0.15, s.life);
+      if(s.miss){
+        ctx.strokeStyle = 'rgba(255,0,170,.85)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0,0,10,0,Math.PI*2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-12,0); ctx.lineTo(12,0);
+        ctx.moveTo(0,-12); ctx.lineTo(0,12);
+        ctx.stroke();
+      }else{
+        ctx.strokeStyle = 'rgba(20,20,20,.85)';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-18, -3);
+        ctx.lineTo(18, 3);
+        ctx.stroke();
+        ctx.globalAlpha *= 0.6;
+        ctx.strokeStyle = 'rgba(255,255,255,.95)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-10, -9);
+        ctx.lineTo(-4, -4);
+        ctx.stroke();
+      }
+      ctx.restore();
+      s.life = Math.max(0, s.life - 0.02);
+    }
+
+    if(aim.has){
+      ctx.save();
+      ctx.globalAlpha = running ? 0.95 : 0.55;
+      ctx.strokeStyle = 'rgba(0,0,0,.55)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(aim.x, aim.y, 10, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(aim.x-14, aim.y); ctx.lineTo(aim.x+14, aim.y);
+      ctx.moveTo(aim.x, aim.y-14); ctx.lineTo(aim.x, aim.y+14);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawFish(type){
+    let fx = fish.x, fy = fish.y, fw = fish.w, fh = fish.h;
+
+    if(fish.flying){
+      const t = Math.min(1, fish.flyT);
+      const startX = fish.x, startY = fish.y;
+      const endX = size.w*0.56 - fw*0.5;
+      const endY = -fh*0.9;
+      const ease = (1 - Math.cos(t*Math.PI))/2;
+      fx = startX + (endX - startX)*ease;
+      fy = startY + (endY - startY)*ease;
+
+      ctx.save();
+      ctx.translate(fx + fw*0.5, fy + fh*0.5);
+      ctx.rotate(-0.15 + ease*0.65);
+      ctx.translate(-(fx + fw*0.5), -(fy + fh*0.5));
+    }
+
+    const cy = fy + fh*0.56;
+
+    // tail fin
+    ctx.fillStyle = type.body;
+    ctx.strokeStyle = 'rgba(0,0,0,.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(fx + fw*0.12, cy);
+    ctx.lineTo(fx - fw*0.10, cy - fh*0.22);
+    ctx.lineTo(fx - fw*0.02, cy);
+    ctx.lineTo(fx - fw*0.10, cy + fh*0.22);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    // body silhouette
+    ctx.beginPath();
+    ctx.moveTo(fx + fw*0.14, cy);
+    ctx.quadraticCurveTo(fx + fw*0.18, fy + fh*0.18, fx + fw*0.52, fy + fh*0.18);
+    ctx.quadraticCurveTo(fx + fw*0.96, fy + fh*0.30, fx + fw*0.94, cy);
+    ctx.quadraticCurveTo(fx + fw*0.96, fy + fh*0.86, fx + fw*0.52, fy + fh*0.90);
+    ctx.quadraticCurveTo(fx + fw*0.18, fy + fh*0.92, fx + fw*0.14, cy);
+    ctx.closePath();
+    ctx.fillStyle = type.body;
+    ctx.fill(); ctx.stroke();
+
+    // top fin
+    ctx.beginPath();
+    ctx.moveTo(fx + fw*0.42, fy + fh*0.18);
+    ctx.lineTo(fx + fw*0.55, fy + fh*0.02);
+    ctx.lineTo(fx + fw*0.62, fy + fh*0.20);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    // belly highlight
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = type.belly;
+    ctx.beginPath();
+    ctx.ellipse(fx + fw*0.60, fy + fh*0.68, fw*0.24, fh*0.18, 0.1, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // gills
+    ctx.strokeStyle = 'rgba(0,0,0,.25)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(fx + fw*0.78, cy, fh*0.18, -0.9, 0.9);
+    ctx.stroke();
+
+    // eye
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(fx + fw*0.86, cy - fh*0.12, Math.min(fw,fh)*0.08, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(fx + fw*0.88, cy - fh*0.11, Math.min(fw,fh)*0.04, 0, Math.PI*2);
+    ctx.fill();
+
+    // pattern
+    if(type.name === 'Salmone'){
+      ctx.globalAlpha = 0.30;
+      ctx.strokeStyle = type.accent;
+      ctx.lineWidth = 3;
+      for(let i=0;i<4;i++){
+        ctx.beginPath();
+        const x1 = fx + fw*(0.34 + i*0.10);
+        ctx.moveTo(x1, fy + fh*0.32);
+        ctx.lineTo(x1 + fw*0.06, fy + fh*0.84);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }else{
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = type.accent;
+      for(let i=0;i<8;i++){
+        const px = fx + fw*(0.30 + (i%4)*0.12);
+        const py = fy + fh*(0.34 + Math.floor(i/4)*0.22);
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // targets
+    if(!fish.flying && running && timeLeft>0){
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = 'rgba(255,255,255,.75)';
+      const n = cutsNeeded;
+      for(let i=0;i<n;i++){
+        const tx = fx + fw*(0.30 + i*(0.50/(n-1)));
+        const ty = fy + fh*0.62;
+        ctx.beginPath();
+        ctx.arc(tx, ty, 7, 0, Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(tx-6, ty);
+        ctx.lineTo(tx+6, ty);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if(fish.flying) ctx.restore();
+  }
+
+  // ---------- Main loop ----------
+  function loop(now){
+    const dt = tickTimer(now);
+
+    if(size.ok && fish.flying){
+      fish.flyT += dt * 1.8;
+      if(fish.flyT >= 1){
+        fish.flying = false;
+        resetFish(false);
+      }
+    }
+
+    drawCat(dt);
+    drawBoard();
+
+    requestAnimationFrame(loop);
+  }
+
+  // init
+  updateTimeUI();
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
